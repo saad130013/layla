@@ -3,7 +3,10 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# تهيئة الصفحة
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#               إعدادات أولية وتهيئة البيانات
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 st.set_page_config(
     page_title="نظام المناوبات - المستشفى",
     layout="wide",
@@ -12,31 +15,46 @@ st.set_page_config(
 st.title("📋 نظام متابعة المناوبات الشهرية")
 
 EXCEL_PATH = "duty_roster_basic_info.xlsx"
+REQUIRED_COLUMNS = ["National ID", "Employee No", "Name", "Present?", "Updated Date"]
 
 @st.cache_data
 def load_data():
     try:
         if os.path.exists(EXCEL_PATH):
-            return pd.read_excel(EXCEL_PATH, engine='openpyxl')
+            df = pd.read_excel(EXCEL_PATH, engine='openpyxl')
+            
+            # إضافة الأعمدة الناقصة إذا لم تكن موجودة
+            for col in REQUIRED_COLUMNS:
+                if col not in df.columns:
+                    df[col] = ""
+            
+            return df
         else:
-            return pd.DataFrame(columns=[
-                "National ID", "Employee No", 
-                "Name", "Present?", "Updated Date"
-            ])
+            # إنشاء ملف جديد مع جميع الأعمدة المطلوبة
+            return pd.DataFrame(columns=REQUIRED_COLUMNS)
+            
     except Exception as e:
         st.error(f"خطأ في تحميل الملف: {str(e)}")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-# تحميل البيانات
+# تحميل البيانات مع التحقق من الهيكل
 df = load_data()
 
-# معالجة البيانات المفقودة
-df["Name"] = df["Name"].fillna("").astype(str)
-df["Employee No"] = df["Employee No"].astype(str).str.strip()
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#               معالجة البيانات المفقودة
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ملء القيم الفارغة وتحويل الأنواع
+for col in REQUIRED_COLUMNS:
+    if col in df.columns:
+        df[col] = df[col].fillna("").astype(str)
+    else:
+        df[col] = ""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#                  جزء البحث والتصفية
+#                     جزء البحث
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 st.sidebar.header("🔍 بحث متقدم")
 search_type = st.sidebar.radio(
     "نوع البحث:",
@@ -48,23 +66,17 @@ results = df.copy()
 if search_type == "بالاسم":
     name_query = st.sidebar.text_input("اكتب جزءًا من الاسم")
     if name_query:
-        results = df[
-            df["Name"].str.contains(name_query, case=False, na=False, regex=False)
-        ]
+        results = df[df["Name"].str.contains(name_query, case=False, regex=False)]
 else:
     emp_query = st.sidebar.text_input("اكتب جزءًا من الرقم")
     if emp_query:
-        results = df[
-            df["Employee No"].str.contains(emp_query, case=False, na=False, regex=False)
-        ]
+        results = df[df["Employee No"].str.contains(emp_query, case=False, regex=False)]
 
-# عرض النتائج
+# عرض النتائج مع تحسينات
 st.subheader("🔎 نتائج البحث")
 if not results.empty:
     st.dataframe(
-        results.style.set_properties(
-            **{'background-color': '#f5f5f5', 'color': 'black'}
-        ),
+        results[REQUIRED_COLUMNS].style.set_properties(**{'background-color': '#f8f9fa'}),
         height=400,
         use_container_width=True
     )
@@ -72,50 +84,51 @@ else:
     st.warning("⚠️ لا توجد نتائج مطابقة")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#                  جزء تحديث البيانات
+#                     جزء التحديث
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 st.divider()
 st.subheader("🔄 تحديث حالة الموظف")
 
 if not df.empty:
-    selected_emp = st.selectbox(
-        "اختر الموظف:",
-        df["Employee No"].unique(),
-        format_func=lambda x: f"{x} - {df[df['Employee No']==x]['Name'].iloc[0]}"
-    )
-    
-    emp_data = df[df["Employee No"] == selected_emp].iloc[0]
-    
-    with st.form("update_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            new_name = st.text_input("الاسم", value=emp_data["Name"])
-            emp_id = st.text_input("رقم الموظف", value=emp_data["Employee No"], disabled=True)
-        with col2:
-            present = st.selectbox("الحضور", ["نعم", "لا"], index=0 if emp_data["Present?"] == "نعم" else 1)
-            update_date = st.date_input("تاريخ التحديث", value=datetime.today())
+    try:
+        selected_emp = st.selectbox(
+            "اختر الموظف:",
+            df["Employee No"].unique(),
+            format_func=lambda x: f"{x} - {df[df['Employee No'] == x]['Name'].values[0]}"
+        )
         
-        if st.form_submit_button("💾 حفظ التغييرات"):
-            try:
+        emp_data = df[df["Employee No"] == selected_emp].iloc[0]
+        
+        with st.form("update_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("الاسم", value=emp_data["Name"])
+            with col2:
+                present = st.selectbox("الحضور", ["نعم", "لا"], index=0 if emp_data["Present?"] == "نعم" else 1)
+                update_date = st.date_input("تاريخ التحديث", value=datetime.today())
+            
+            if st.form_submit_button("💾 حفظ التغييرات"):
                 df.loc[df["Employee No"] == selected_emp, "Name"] = new_name
                 df.loc[df["Employee No"] == selected_emp, "Present?"] = present
-                df.loc[df["Employee No"] == selected_emp, "Updated Date"] = update_date
+                df.loc[df["Employee No"] == selected_emp, "Updated Date"] = str(update_date)
                 df.to_excel(EXCEL_PATH, index=False, engine='openpyxl')
                 st.success("✅ تم التحديث بنجاح")
                 st.rerun()
-            except PermissionError:
-                st.error("❌ يرجى إغلاق ملف Excel قبل الحفظ")
+                
+    except Exception as e:
+        st.error(f"حدث خطأ: {str(e)}")
 else:
     st.info("ℹ️ لا توجد بيانات متاحة للتحديث")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#                  تعليمات التشغيل
+#                     تعليمات التشغيل
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.sidebar.divider()
 st.sidebar.markdown("""
-**تعليمات التشغيل:**  
-1. تأكد من تثبيت المكتبات المطلوبة:  
+**التعليمات:**  
+1. تأكد من تثبيت:  
    `pip install openpyxl`  
-2. اختبر البحث بأجزاء من الاسم أو الرقم  
-3. أغلق ملف Excel أثناء التشغيل
+2. ابحث باستخدام جزء من الاسم/الرقم  
+3. أغلق ملف Excel قبل التحديث  
 """)
